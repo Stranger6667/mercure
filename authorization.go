@@ -125,10 +125,10 @@ func validateJWT(encodedToken string, jwtConfig *jwtConfig) (*claims, error) {
 	return nil, ErrInvalidJWT
 }
 
-func canReceive(s *TopicSelectorStore, topics, topicSelectors []string, addToCache bool) bool {
+func canReceive(s *TopicSelectorStore, topics, topicSelectors []string) bool {
 	for _, topic := range topics {
 		for _, topicSelector := range topicSelectors {
-			if s.match(topic, topicSelector, addToCache) {
+			if s.match(topic, topicSelector) {
 				return true
 			}
 		}
@@ -145,7 +145,7 @@ func canDispatch(s *TopicSelectorStore, topics, topicSelectors []string) bool {
 				return true
 			}
 
-			if s.match(topic, topicSelector, false) {
+			if s.match(topic, topicSelector) {
 				matched = true
 
 				break

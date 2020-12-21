@@ -27,19 +27,19 @@ func NewTopicSelectorStore() (*TopicSelectorStore, error) {
 	return nil, err
 }
 
-func (tss *TopicSelectorStore) match(topic, topicSelector string, addToCache bool) bool {
+func (tss *TopicSelectorStore) match(topic, topicSelector string) bool {
 	// Always do an exact matching comparison first
 	// Also check if the topic selector is the reserved keyword *
 	if topicSelector == "*" || topic == topicSelector {
 		return true
 	}
 
-	r := tss.getRegexp(topicSelector, addToCache)
+	r := tss.getRegexp(topicSelector)
 	if r == nil {
 		return false
 	}
 
-	k := "m" + "_" + topicSelector + "_" + topic
+	k := "m_" + topicSelector + "_" + topic
 	value, found := tss.Get(k)
 	if found {
 		return value.(bool)
@@ -54,7 +54,7 @@ func (tss *TopicSelectorStore) match(topic, topicSelector string, addToCache boo
 }
 
 // getRegexp retrieves regexp for this template selector.
-func (tss *TopicSelectorStore) getRegexp(topicSelector string, addToCache bool) *regexp.Regexp {
+func (tss *TopicSelectorStore) getRegexp(topicSelector string) *regexp.Regexp {
 	// If it's definitely not an URI template, skip to save some resources
 	if !strings.Contains(topicSelector, "{") {
 		return nil
@@ -76,9 +76,4 @@ func (tss *TopicSelectorStore) getRegexp(topicSelector string, addToCache bool) 
 	}
 
 	return nil
-}
-
-// cleanup removes unused compiled templates from memory.
-func (tss *TopicSelectorStore) cleanup(topics []string) {
-	// FIXME: to remove
 }
