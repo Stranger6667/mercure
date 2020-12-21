@@ -245,9 +245,14 @@ func NewHub(options ...Option) (*Hub, error) {
 		opt.metrics = NopMetrics{}
 	}
 
+	tss, err := NewTopicSelectorStore()
+	if err != nil {
+		return nil, err
+	}
+
 	h := &Hub{
 		opt:                opt,
-		topicSelectorStore: NewTopicSelectorStore(),
+		topicSelectorStore: tss,
 	}
 	h.initHandler()
 

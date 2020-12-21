@@ -3,29 +3,28 @@ package mercure
 import (
 	"regexp"
 	"strings"
-	"sync"
 
-	"github.com/yosida95/uritemplate"
+	"github.com/dgraph-io/ristretto"
+	uritemplate "github.com/yosida95/uritemplate/v3"
 )
-
-type selector struct {
-	sync.RWMutex
-	// counter stores the number of subsribers currently using this topic
-	counter uint32
-	// the regexp.Regexp instance, of nil if it's a raw string
-	regexp     *regexp.Regexp
-	matchCache map[string]bool
-}
 
 // topicSelectorStore caches compiled templates to improve memory and CPU usage.
 type TopicSelectorStore struct {
-	sync.RWMutex
-	m map[string]*selector
+	*ristretto.Cache
 }
 
 // NewTopicSelectorStore creates a new topic selector store.
-func NewTopicSelectorStore() *TopicSelectorStore {
-	return &TopicSelectorStore{m: make(map[string]*selector)}
+func NewTopicSelectorStore() (*TopicSelectorStore, error) {
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,     // number of keys to track frequency of (10M).
+		MaxCost:     1 << 30, // maximum cost of cache (1GB).
+		BufferItems: 64,      // number of keys per Get buffer.
+	})
+	if err == nil {
+		return &TopicSelectorStore{cache}, nil
+	}
+
+	return nil, err
 }
 
 func (tss *TopicSelectorStore) match(topic, topicSelector string, addToCache bool) bool {
@@ -35,74 +34,51 @@ func (tss *TopicSelectorStore) match(topic, topicSelector string, addToCache boo
 		return true
 	}
 
-	templateStore := tss.getTemplateStore(topicSelector, addToCache)
-	templateStore.RLock()
-	match, ok := templateStore.matchCache[topic]
-	templateStore.RUnlock()
-	if ok {
-		return match
+	r := tss.getRegexp(topicSelector, addToCache)
+	if r == nil {
+		return false
+	}
+
+	k := "m" + "_" + topicSelector + "_" + topic
+	value, found := tss.Get(k)
+	if found {
+		return value.(bool)
 	}
 
 	// Use template.Regexp() instead of template.Match() for performance
 	// See https://github.com/yosida95/uritemplate/pull/7
-	match = templateStore.regexp != nil && templateStore.regexp.MatchString(topic)
-	templateStore.Lock()
-	templateStore.matchCache[topic] = match
-	templateStore.Unlock()
+	match := r.MatchString(topic)
+	tss.Set(k, match, 1)
 
 	return match
 }
 
-// getTemplateStore retrieves or creates the compiled template associated with this topic, or nil if it's not a template.
-func (tss *TopicSelectorStore) getTemplateStore(topicSelector string, addToCache bool) *selector {
-	if addToCache {
-		tss.Lock()
-		defer tss.Unlock()
-	} else {
-		tss.RLock()
-	}
-
-	s, ok := tss.m[topicSelector]
-	if !addToCache {
-		tss.RUnlock()
-	}
-	if ok {
-		if addToCache {
-			s.counter++
-		}
-
-		return s
-	}
-
-	s = &selector{matchCache: make(map[string]bool)}
+// getRegexp retrieves regexp for this template selector.
+func (tss *TopicSelectorStore) getRegexp(topicSelector string, addToCache bool) *regexp.Regexp {
 	// If it's definitely not an URI template, skip to save some resources
-	if strings.Contains(topicSelector, "{") {
-		// If an error occurs, it's a raw string
-		if tpl, err := uritemplate.New(topicSelector); err == nil {
-			s.regexp = tpl.Regexp()
-		}
+	if !strings.Contains(topicSelector, "{") {
+		return nil
 	}
 
-	if addToCache {
-		tss.m[topicSelector] = s
+	k := "t" + topicSelector
+
+	value, found := tss.Get(k)
+	if found {
+		return value.(*regexp.Regexp)
 	}
 
-	return s
+	// If an error occurs, it's a raw string
+	if tpl, err := uritemplate.New(topicSelector); err == nil {
+		r := tpl.Regexp()
+		tss.Set(k, r, 10)
+
+		return r
+	}
+
+	return nil
 }
 
 // cleanup removes unused compiled templates from memory.
 func (tss *TopicSelectorStore) cleanup(topics []string) {
-	tss.Lock()
-	defer tss.Unlock()
-	for _, topic := range topics {
-		if tc, ok := tss.m[topic]; ok {
-			if tc.counter == 0 {
-				delete(tss.m, topic)
-
-				continue
-			}
-
-			tc.counter--
-		}
-	}
+	// FIXME: to remove
 }
